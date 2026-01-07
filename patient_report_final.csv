@@ -1,0 +1,3 @@
+id,patient_name,diagnosis,vitals,medications,follow_up_plan
+Patient_2,Jane Smith,Seasonal Allergic Rhinitis,['clear nasal discharge'],['Cetirizine 10mg daily'],No specific follow-up plan mentioned in the provided text.
+Patient_1,John Doe,Mild Hypertension,"['BP 140/90', 'HR 85 bpm', 'BP 130/85']",['Lisinopril 10mg'],Schedule next checkup in 2 weeks

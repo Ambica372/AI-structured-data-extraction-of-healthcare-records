@@ -1,0 +1,1 @@
+Patient: John Doe. Date: 2024-05-10. The patient has been complaining of chest pain. Blood pressure was measured at 140/90. Heart rate 85 bpm. Diagnosis: Mild Hypertension. Prescribed Lisinopril 10mg.
