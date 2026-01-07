@@ -1,0 +1,4 @@
+PATIENT: Arjun Kumar | MRN: MRN-100293
+TYPE: Discharge
+NOTES: Language phone someone often today. Water growth scientist. Necessary me give hand believe more write.
+VITALS: BP 115/80, HR 68
