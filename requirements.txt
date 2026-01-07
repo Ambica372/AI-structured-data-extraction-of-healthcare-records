@@ -1,0 +1,8 @@
+cat <<EOF > requirements.txt
+langchain
+langchain-google-genai
+chromadb
+sentence-transformers
+faker
+pypdf
+EOF
