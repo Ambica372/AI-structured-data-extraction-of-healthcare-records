@@ -1,4 +1,4 @@
 PATIENT: Arjun Kumar | MRN: MRN-100293
-TYPE: Lab
-NOTES: Event can could how. Blood decade look claim play series bag work. Recognize loss red value accept life give.
-VITALS: BP 115/80, HR 71
+TYPE: Discharge
+NOTES: Just fire build phone hard believe prove and. Pm least describe tell arm approach. Camera movie result.
+VITALS: BP 111/80, HR 75

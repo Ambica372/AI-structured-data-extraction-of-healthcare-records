@@ -1,54 +1,38 @@
-import os
-from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_core.prompts import ChatPromptTemplate
+import json
+from langchain_core.output_parsers import JsonOutputParser
+from pydantic import BaseModel, Field
 
-# 1. Load Environment Variables (API Key)
-load_dotenv()
+# 1. Define the Data Structure we want
+class PatientSummary(BaseModel):
+    patient_name: str = Field(description="Name of the patient")
+    diagnosis: str = Field(description="The main medical condition identified")
+    avg_blood_pressure: str = Field(description="Average BP reading from notes")
+    medications: list = Field(description="List of medications mentioned")
+    follow_up_required: bool = Field(description="True if a follow-up is mentioned")
 
-def run_healthcare_extraction(patient_id, patient_name):
-    print(f"\n🚀 Analyzing records for {patient_name} ({patient_id})...")
+# 2. Update the run_healthcare_extraction function
+def run_structured_extraction(patient_id):
+    # (Keep your existing Loader and Vectorstore code here...)
     
-    # 2. Load the 10 files from the data folder
-    path = f"./data/{patient_id}/"
-    loader = DirectoryLoader(path, glob="*.txt", loader_cls=TextLoader)
-    docs = loader.load()
+    parser = JsonOutputParser(pydantic_object=PatientSummary)
 
-    # 3. Split text into manageable chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    splits = text_splitter.split_documents(docs)
-
-    # 4. Create Vector Database (In-Memory for now)
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
-    vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
-
-    # 5. Define the Medical Prompt
     template = """
-    You are a professional Medical Registrar. Summarize the following clinical notes 
-    into a structured format including:
-    - Primary Symptoms/Observations
-    - Recorded Vitals (Average BP/HR)
-    - Recommended Follow-up
+    Extract the following medical details from the clinical context. 
+    Return ONLY a JSON object.
     
     Context: {context}
+    
+    {format_instructions}
     """
-    prompt = ChatPromptTemplate.from_template(template)
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
-
-    # 6. Retrieve info and generate response
-    context_docs = vectorstore.similarity_search("vitals and diagnosis", k=5)
-    context_text = "\n".join([d.page_content for d in context_docs])
     
-    chain = prompt | llm
-    response = chain.invoke({"context": context_text})
-    
-    print(f"--- MEDICAL SUMMARY: {patient_name} ---")
-    print(response.content)
+    prompt = ChatPromptTemplate.from_template(
+        template,
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    )
 
-if __name__ == "__main__":
-    # Test for Patient 1
-    run_healthcare_extraction("Patient_1", "Arjun Kumar")
+    chain = prompt | llm | parser
+    
+    # Run and print the clean JSON
+    result = chain.invoke({"context": context_text})
+    print(json.dumps(result, indent=2))
+    return result
