@@ -1,92 +1,131 @@
-import json
-import sqlite3
+!pip install chromadb google-generativeai
+
 import pathlib
-import os
 import pandas as pd
 import chromadb
 from google import genai
-from google.genai import types
-from tabulate import tabulate
+import os
 
-# --- CONFIGURATION ---
-API_KEY = "AIzaSyDatDvj9ZPKwMUVZnCIFO0dorxGiI53oB8"
-MODEL_ID = "gemini-2.5-flash"
-DB_NAME = "temp_healthcare.db"
+# ========== CONFIG ==========
+API_KEY = "enter_api_key"
+MODEL = "gemini-2.5-flash"
+DATA_DIR = "/data"
+OUTPUT_FILE = "patient_report_final.csv"
+# ============================
 
-RESPONSE_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "patient_name": {"type": "STRING"},
-        "diagnosis": {"type": "STRING"},
-        "vitals": {"type": "ARRAY", "items": {"type": "STRING"}},
-        "medications": {"type": "ARRAY", "items": {"type": "STRING"}},
-        "follow_up_plan": {"type": "STRING"}
-    },
-    "required": ["patient_name", "diagnosis", "vitals", "medications", "follow_up_plan"]
-}
+if not os.path.exists(DATA_DIR):
+    raise FileNotFoundError("Folder /data not found")
 
-def run_final_system():
-    client = genai.Client(api_key=API_KEY)
-    chroma_client = chromadb.Client()
-    
-    # Setup temporary storage
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS records (id TEXT, data TEXT)")
+client = genai.Client(api_key=API_KEY)
+chroma = chromadb.Client()
 
-    patient_folders = [f for f in pathlib.Path("data").iterdir() if f.is_dir()]
+rows = []
 
-    for folder in patient_folders:
-        print(f"🔄 Processing {folder.name}...")
-        
-        # RAG Indexing
-        coll_name = f"c_{folder.name.lower().replace('_', '')}"
-        collection = chroma_client.get_or_create_collection(name=coll_name)
-        for file in folder.glob("*.txt"):
-            collection.add(documents=[file.read_text()], ids=[file.name])
+# ---------- HELPERS ----------
 
-        # Retrieval
-        results = collection.query(query_texts=["medical details"], n_results=3)
-        context = "\n".join(results['documents'][0])
-        if len(context.strip()) < 50:
-            context = "\n".join([f.read_text() for f in folder.glob("*.txt")])
+def safe(value):
+    return value if value else "Not mentioned"
 
-        # AI Extraction
-        try:
-            response = client.models.generate_content(
-                model=MODEL_ID,
-                contents=f"Extract JSON from:\n{context}",
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=RESPONSE_SCHEMA
-                )
-            )
-            cursor.execute("INSERT INTO records VALUES (?, ?)", (folder.name, response.text))
-            conn.commit()
-        except Exception as e:
-            print(f"⚠️ Error on {folder.name}: {e}")
-        
-        chroma_client.delete_collection(name=coll_name)
+def cross_patient_check(text, current_patient):
+    text = text.lower()
+    for p in ["patient_1", "patient_2", "patient_3"]:
+        if p != current_patient.lower() and p in text:
+            return False
+    return True
 
-    # Export and Cleanup
-    df = pd.read_sql_query("SELECT * FROM records", conn)
-    conn.close()
+def parse_output(text):
+    result = {
+        "patient_name": "Not mentioned",
+        "diagnosis": "Not mentioned",
+        "vitals": "Not mentioned",
+        "medications": "Not mentioned",
+        "follow_up_plan": "Not mentioned"
+    }
 
-    if not df.empty:
-        # Format the final report
-        final_data = [json.loads(r) for r in df['data']]
-        report_df = pd.concat([df[['id']], pd.DataFrame(final_data)], axis=1)
-        report_df.to_csv("patient_report_final.csv", index=False)
-        
-        # Print Table
-        print("\n" + "═"*50)
-        print(tabulate(report_df[['id', 'patient_name', 'diagnosis']], headers='keys', tablefmt='psql'))
-        print("═"*50)
-        print("✅ Success! CSV generated and temporary database deleted.")
-    
-    # Remove the .db file to keep the folder clean
-    if os.path.exists(DB_NAME):
-        os.remove(DB_NAME)
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.lower().strip()
+        value = value.strip()
 
-if __name__ == "__main__":
-    run_final_system()
+        if "patient name" in key:
+            result["patient_name"] = value
+        elif "diagnosis" in key:
+            result["diagnosis"] = value
+        elif "vitals" in key:
+            result["vitals"] = value
+        elif "medications" in key:
+            result["medications"] = value
+        elif "follow up" in key:
+            result["follow_up_plan"] = value
+
+    return result
+
+# ---------- MAIN LOOP ----------
+
+for patient_dir in pathlib.Path(DATA_DIR).iterdir():
+    if not patient_dir.is_dir():
+        continue
+
+    print(f"Processing {patient_dir.name}")
+
+    collection = chroma.get_or_create_collection(patient_dir.name)
+
+    for file in patient_dir.glob("*.txt"):
+        collection.add(documents=[file.read_text()], ids=[file.name])
+
+    docs = collection.query(
+        query_texts=["extract patient medical details"],
+        n_results=3
+    )["documents"][0]
+
+    context = "\n".join(docs)
+
+    prompt = f"""
+Extract patient information using EXACTLY this format:
+
+Patient Name: ...
+Diagnosis: ...
+Vitals: ...
+Medications: ...
+Follow Up Plan: ...
+
+No extra text.
+
+Clinical notes:
+{context}
+"""
+
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt
+    )
+
+    raw = response.text.strip()
+
+    if not cross_patient_check(raw, patient_dir.name):
+        print("❌ Cross-patient contamination detected")
+        chroma.delete_collection(patient_dir.name)
+        continue
+
+    parsed = parse_output(raw)
+
+    rows.append({
+        "id": patient_dir.name,
+        **parsed
+    })
+
+    chroma.delete_collection(patient_dir.name)
+
+# ---------- SAVE ----------
+
+df = pd.DataFrame(rows)
+
+# Make display readable in Colab
+pd.set_option("display.max_colwidth", 80)
+
+df.to_csv(OUTPUT_FILE, index=False)
+
+print(f"\n✅ CSV generated cleanly: {OUTPUT_FILE}")
+display(df)
