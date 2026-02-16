@@ -1,5 +1,6 @@
 import gradio as gr
-from google import genai
+import google.generativeai as genai
+
 import os
 
 MODEL = "gemini-2.5-flash"
